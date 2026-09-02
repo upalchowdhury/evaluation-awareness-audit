@@ -61,24 +61,6 @@ python scripts/sample_audit.py --results results_v2 --model qwen15b --n 8 --seed
 python scripts/recompute_headline.py --results results_v2 --model qwen15b
 ```
 
-## Design choices a reviewer will ask about
-
-- **Split discipline.** Contents are split 50/50 once; probes and directions
-  are fit on train contents only; every causal and behavioural number uses
-  test contents; CIs are bootstraps that resample whole contents.
-- **Locked layers.** Wherever a layer is selected, it is selected on half of
-  the test contents and the effect is estimated on the other half.
-- **Calibration.** Every intervention effect is reported next to the model's
-  own natural eval-vs-deploy gap in the readout and next to the 95th
-  percentile of 100 random directions at the same norm and dose.
-- **The control.** An unrelated-prompt control that shares the source's class
-  cannot estimate a class effect; the source design is completed to a 2x2.
-- **Trailing-cue templates** (text after the task) are excluded from patching
-  pairs because they do not share the task suffix with their twin.
-- **Interaction** contrasts are halved so they sit on the main-effect scale.
-- **Multiple comparisons.** The positional table carries Holm-corrected
-  markers over all its cells.
-
 ## Repo layout
 
 ```
