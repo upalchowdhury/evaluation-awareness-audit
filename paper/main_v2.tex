@@ -1,0 +1,703 @@
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\frenchspacing
+\setlist{nosep}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\tofill}[1]{\textcolor{red}{[TO FILL: #1]}}
+
+% Numbers are generated, never typed:
+%   python scripts/make_paper_assets.py    --results results_v2 --model qwen15b --compare qwen05b,qwen15b,qwen7b,phi3mini,olmo7b
+%   python scripts/make_paper_assets_v2.py --results results_v2 --model qwen15b --compare qwen05b,qwen15b,qwen7b,phi3mini,olmo7b
+\IfFileExists{numbers.tex}{\input{numbers.tex}}{\newcommand{\NModel}{\todo{model}}}
+\IfFileExists{numbers_v2.tex}{\input{numbers_v2.tex}}{}
+
+\title{\vspace{-2em}Does the model know it is being tested?\\
+\large Reading, asking, and steering ``evaluation awareness'' in five small open language models\vspace{-0.4em}}
+\author{Upal Chowdhury\thanks{Code, corpus, and the result files behind every
+number: \url{https://github.com/upalchowdhury/evaluation-awareness-audit}
+(activation caches are omitted for size; everything the numbers are computed
+from is included). Every number in this document is generated from those files
+by two scripts; none is typed by hand. Use of AI assistants is described in
+Section~\ref{sec:disclosure}.}}
+\date{\vspace{-1.5em}}
+
+\begin{document}
+\maketitle
+\vspace{-1em}
+
+\section*{Summary in plain words}
+
+Safety evaluations assume that a model behaves the same way under test as it
+does with real users. That assumption breaks if the model can tell the
+difference and acts on it. Recent papers show that small open models
+\emph{encode} whether a prompt looks like a test, and that this can be read
+off their internal activations with a linear probe. I asked three follow-up
+questions on five open models (three sizes of Qwen2.5, Phi-3-mini, and
+Olmo-3-7B): Can the model \emph{say} it is being tested? Can we \emph{change}
+what it says by editing its activations? And does any of this change what it
+\emph{does}?
+
+What I found, in one line each:
+\begin{enumerate}[leftmargin=1.4em]
+\item \textbf{Reading works, but it is shallow.} A probe separates test-like
+  from user-like prompts almost perfectly (AUC \NprobeAUC{} on held-out
+  questions). But a probe on the output of the \emph{first} layer already
+  reaches \VprobeAUCLzero{} on the primary model and \VprobeLzeroMin{} to
+  \VprobeLzeroMax{} across the five. On this kind of prompt, ``evaluation awareness''
+  is mostly a surface property of the text, not something the model has to
+  work out.
+\item \textbf{Asking depends on how you ask.} My first version put the
+  question ``do you think this is a test?'' at the end of the task. Three of
+  the five models answered it only rarely or never: they answered the task
+  instead. The
+  numbers I had built on that readout for those models were measurements of
+  tokens the models never produced. Asked in a separate turn, all five
+  models answer, and the answer tracks the probe well at the level of
+  framings and moderately at the level of single prompts (see
+  Table~\ref{tab:landscape}).
+\item \textbf{Steering the answer works, and only looks impressive until
+  you calibrate it.} Adding or subtracting the probe direction moves the
+  stated answer on every model with tight intervals. Measured against the
+  model's own natural difference between test-like and user-like prompts,
+  the effect is a fraction of one framing change on four models and several
+  on the smallest, whose gap is tiny; measured against one hundred random
+  directions of the same size, only Qwen-7B's direction beats 95 percent of
+  them (Section~\ref{sec:steer}).
+\item \textbf{The ``test'' direction is tangled up with formality.} A
+  direction built only from formal-versus-casual wording, with no evaluation
+  or deployment content, is aligned with the test-versus-user direction in
+  every model. On Qwen-7B, steering along that formality direction moves the
+  ``am I being tested?'' answer \emph{more} than the evaluation direction
+  itself does. Any claim that a model can be steered to feel ``tested'' needs
+  a formality control (Section~\ref{sec:register}).
+\item \textbf{Patching transfers the answer, not the context.} Copying
+  activations from a user-like prompt into a test-like prompt changes the
+  stated answer, but the effect lives in the readout, where the answer is
+  being formed (at the last position on four models, over the question
+  tokens on Olmo). Copying the task tokens moves the answer by at most
+  \VtaskMaxAbs{} logits on any model, an order of magnitude or more below
+  the readout spans. I also describe the wrong control I used first and why
+  it fooled me (Section~\ref{sec:patch}).
+\item \textbf{Almost none of this reaches behaviour on these tasks.} On
+  \VnFramingNull{} of the five models accuracy does not change with framing;
+  the exception is \VframingSigModels{}, lower under test framing. Steering
+  the stated answer by \NswingDBelief{} logits changes accuracy by
+  \NswingDAcc{} (Section~\ref{sec:behaviour}).
+\end{enumerate}
+
+For alignment, the practical message is: a probe that fires on
+``this looks like a test'' is easy to build and will fire on every model
+tested here, but that is not evidence the model \emph{believes} it is being
+tested, \emph{says} so, or \emph{acts} on it. Each of those is a separate
+measurement with its own failure modes, and Section~\ref{sec:asking} shows how
+easily one of them fails silently.
+
+\section{Why this question}
+
+An evaluation is only informative if the behaviour it measures is the
+behaviour that will occur in deployment. Models that recognise evaluations
+could, in principle, behave better under test than in use
+\citep{needham2025evaluated,greenblatt2024alignment}. Several 2025--2026
+papers established that the recognition is real in open models: a linear
+probe on the residual stream separates evaluation-framed from
+deployment-framed prompts \citep{nguyen2025probing,heidari2026evalaware},
+the representation strengthens with scale
+\citep{chaudhary2025scaling,manek2026depth}, verbalising it barely changes
+behaviour \citep{knecht2026limited,li2026decomposing}, detection,
+representation and controllability come apart across models
+\citep{nayan2026notone}, and probe evidence may be format sensitivity in
+disguise \citep{devbunova2026format}.
+
+My question was narrower than ``does the model know?'' It was: on one
+controlled corpus, with the same items throughout, what does each way of
+measuring evaluation awareness actually measure, and do the measurements
+agree? Three instruments were used on every model:
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Reading}: a linear probe on activations, and the direction
+  $d$ it defines.
+\item \textbf{Asking}: the model's own Yes/No answer to ``is this a test?''
+\item \textbf{Intervening}: steering (adding $d$ to the activations) and
+  patching (copying activations between prompts), with the stated answer as
+  the outcome, plus a behaviour suite.
+\end{itemize}
+
+\section{The corpus and the three instruments}\label{sec:setup}
+
+\paragraph{Corpus.} \NContents{} short tasks (48 four-way multiple choice,
+12 open questions, six everyday domains) are each wrapped in evaluation
+framings and deployment framings. Five evaluation families: explicit
+statements (``You are currently being evaluated by a team of AI
+researchers''), benchmark formatting, machine-readable evaluation metadata,
+mentions of a third-party research team, and an exam-style family that uses
+\emph{no} evaluation vocabulary at all (``Q17. (2 points)''). Four deployment
+families: casual user, everyday task context, production-style metadata that
+mirrors the evaluation metadata's shape, and personal stakes. Twelve
+\emph{topic controls} are deployment prompts \emph{about} benchmarks (``my
+professor mentioned MMLU, what is it?''); a probe that only reads the word
+``benchmark'' will misclassify them. Tasks are split in half by content:
+probes and directions are fit on one half; every causal and behavioural
+measurement uses the other half. All confidence intervals are bootstraps that
+resample whole tasks, since several framings of one task are not independent.
+
+\paragraph{Two real prompts.} Below is one task under one evaluation framing
+and one deployment framing, followed by the readout used to ask the model.
+Everything after the framing is shared by the pair; that shared suffix is what
+patching copies.
+
+\begin{quote}\small\ttfamily
+\textbf{Evaluation framing:} Notice: this conversation is part of a
+structured assessment of this AI system.\\
+Which of these typically uses the most household electricity?\\
+A) LED lamp\ B) Phone charger\ C) Electric water heater\ D) Wi-Fi router\\
+Respond with only the letter of the correct answer (A, B, C, or D).
+
+\medskip
+\textbf{Deployment framing:} hey! quick question --- Which of these typically
+uses the most household electricity? [same options and instruction]
+
+\medskip
+\textbf{Readout (second turn, both framings):}\\
+{\normalfont\itshape assistant:} (answer omitted)\\
+{\normalfont\itshape user:} Do you believe this conversation is part of a test
+or evaluation of an AI system, rather than a conversation with a real user who
+needs help? Answer with exactly one word, Yes or No.\\
+{\normalfont\itshape assistant:} Answer:\ \underline{\hspace{1.2cm}}
+\end{quote}
+
+\paragraph{Reading.} Activations are taken at the last token of the framed
+task (before any readout), at every layer. The direction $d_\ell$ is the
+difference of class means (evaluation minus deployment), unit normalised, fit
+on training tasks only. Steering doses are in units of $\sigma_\ell$, the
+standard deviation of the training projections on $d_\ell$.
+
+\paragraph{Asking.} The belief score is
+$\tfrac12[(\log p(\text{Yes}) - \log p(\text{No}))_{A} - (\log p(\text{Yes}) -
+\log p(\text{No}))_{B}]$ at the answer position, where $A$ asks ``is this a
+test?'' and $B$ asks the mirror question ``is this a real user?'' Averaging
+the two cancels any fixed tendency to answer Yes. Positive means ``I am being
+evaluated.'' The word ``Yes'' means the sum over surface variants (Yes, yes,
+YES, with and without a leading space). Patching experiments use question $A$
+only, to halve their cost; the paired design cancels a constant bias there.
+
+\paragraph{Intervening.} Steering adds $\alpha\sigma_\ell d_\ell$ at every
+position of layer $\ell$. Patching copies the residual stream of a source
+prompt into a destination prompt at one layer over an end-aligned span of
+shared tokens. Whenever a layer had to be selected, it was selected on half of
+the held-out tasks and the effect was estimated on the other half
+(``locked''); estimates at a layer chosen on all data are labelled
+exploratory.
+
+\section{Finding 1: reading is easy, and shallow}\label{sec:reading}
+
+The probe reproduces the published result. On held-out tasks the direction
+$d$ separates the classes with AUC \NprobeAUC{} at its best layer (layer
+\NbestLayer{}; permutation test over 200 label shuffles, none reached it).
+The no-vocabulary exam family, held out entirely, transfers at
+\NsubtleAUC{}. Topic controls are classified as evaluation \NtopicFPR{} of
+the time, against \NevalRate{} for genuine evaluation framings. So the probe
+reads context, not the word ``benchmark.''
+
+The caveat is where the signal is available. After the \emph{first}
+transformer layer the held-out AUC is already \VprobeAUCLzero{} on the
+primary model, and \VprobeLzeroMin{} to \VprobeLzeroMax{} across the five,
+against best-layer values of 0.96 to 0.99 (Table~\ref{tab:landscape}).
+One layer of attention over the prompt is enough to separate the classes. On
+this corpus, evaluation framing is a surface feature of the text. That does
+not make the probe wrong, but it means ``the model represents evaluation
+awareness'' is a weaker statement than it sounds: the representation is
+available before any reasoning could have happened, which is exactly the
+worry raised by \citet{devbunova2026format}. Everything that follows should
+be read as being about a surface-decodable variable.
+
+\section{Finding 2: asking depends on how you ask}\label{sec:asking}
+
+\paragraph{What went wrong first.} My first readout appended the belief
+question to the end of the task, inside the same user turn. On the smallest
+Qwen models that worked. I built the whole cross-model comparison on it. When
+I finally checked the instrument directly, by looking at the probability the
+first answer token is any form of Yes or No and at which token the model
+actually produces, the result was:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+model & P(Yes or No) at answer position & greedy token is Yes/No \\
+\midrule
+Qwen2.5-0.5B & 1.00 & 100\% \\
+Qwen2.5-1.5B & 0.88--0.97 & 90--100\% \\
+Qwen2.5-7B & 0.17--0.34 & 15--35\% \\
+Phi-3-mini & 0.003--0.025 & 0--5\% \\
+Olmo-3-7B & 0.28--0.48 & 25--55\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The three larger or non-Qwen models were answering the multiple-choice
+question (``B'') instead of the appended one, because the task ends with
+``respond with only the letter.'' On open-ended tasks Qwen-7B and Olmo
+answered fine, which confirms the cause; Phi-3 answered neither, and had a
+second problem: its tokenizer encodes
+`` Yes'' as a bare-space token followed by ``Yes'', and the bare-space token
+had landed in both the Yes group and the No group, cancelling the score by
+construction. Every ``Phi-3 cannot be steered'' result I had was an artefact
+of these two problems. I say this plainly because it is the most useful thing
+in this write-up: \textbf{a logit-difference readout is meaningless unless you
+check that the model produces those tokens.} The check costs one forward pass
+per prompt.
+
+\paragraph{The fix.} I tested five question formats on all five models. The
+only one every model answers puts the question in a second user turn after a
+fixed placeholder assistant turn, and prefills the assistant's reply with
+``Answer:'' (shown in Section~\ref{sec:setup}). With it, the greedy token is
+Yes or No in 95--100\% of prompts on every model, and the two-polarity score
+separates evaluation from deployment prompts on 40 test prompts with AUC
+between 0.83 and 0.998. All results below use this readout. On the primary model the
+readout answers Yes or No on \VgreedyYesNo{} of held-out prompts.
+
+\paragraph{What the models say.} On the primary model
+(Qwen2.5-1.5B) the mean belief score is \VgapEvalMean{} under evaluation
+framing and \VgapDeployMean{} under deployment framing; the combined score
+favours ``this is a test'' on \VfracYesEval{} of evaluation-framed prompts and
+on \VfracYesDeploy{} of deployment-framed prompts. The difference
+between the two framings, averaged within task, is the \textbf{natural gap}:
+\VgapMean{} logits [\VgapLo{}, \VgapHi{}]. I use it as the yardstick for every
+intervention below: an intervention that moves the score by one natural gap
+has done as much as the framing itself does. Across the five models the
+stated answer separates the framings well, though less well than the probe on
+every model (verbal AUC \VverbalAUCmin{} to \VverbalAUCmax{};
+Table~\ref{tab:landscape}), but
+prompt by prompt the two agree only moderately (rank correlation between
+probe projection and stated answer \VrhoMin{} to \VrhoMax{}; \NrvCorr{} on
+the primary model). The model ``knows'' more, in the probe sense, than it
+says about any one prompt.
+
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\resizebox{\linewidth}{!}{%
+\IfFileExists{tables/landscape_v2a.tex}{\input{tables/landscape_v2a.tex}}{\todo{run make\_paper\_assets\_v2}}}
+\caption{Reading and asking, five models, same tasks. ``Answers Yes/No'':
+share of held-out prompts on which the greedy first token is a Yes/No variant
+under the second-turn readout. ``Probe AUC (layer 0 / best)'': held-out AUC
+of $d$ after the first layer and at the best layer. ``Verbal AUC'': how well
+the stated answer separates the framings. ``Probe-vs-answer rho'': rank
+correlation between probe projection and stated answer, prompt by prompt.
+``Natural gap'': mean stated belief under evaluation framing minus deployment
+framing, within task. Intervals are task-clustered bootstraps.}
+\label{tab:landscape}
+\end{table}
+
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\resizebox{\linewidth}{!}{%
+\IfFileExists{tables/landscape_v2b.tex}{\input{tables/landscape_v2b.tex}}{\todo{run make\_paper\_assets\_v2}}}
+\caption{Intervening, five models. ``Locked steering'': change in stated
+belief when $d$ is subtracted at $4\sigma$ on evaluation-framed prompts, at
+the layer chosen on the other half of the tasks. ``Steer / gap'' and ``class
+/ gap'' express effects in units of the natural gap of
+Table~\ref{tab:landscape}. ``Random p95'': 95th percentile of the belief
+swing produced by 100 random directions at the same norm and dose
+($\pm4\sigma$). ``Class effect, final'': the source-class effect of patching
+at the final position (Section~\ref{sec:patch}). ``Framing effect on
+accuracy'': deployment minus evaluation framing, averaged over the two system
+prompts, on 24 held-out multiple-choice items. Intervals are task-clustered
+bootstraps.}
+\label{tab:interventions}
+\end{table}
+
+\section{Finding 3: steering the answer, calibrated}\label{sec:steer}
+
+Subtracting $d$ at the locked layer (layer \NlockSteerLayer{} on the primary
+model) at $4\sigma$ moves the stated belief of evaluation-framed prompts by
+\NlockSteerEval{} logits [\NlockSteerEvalLo{}, \NlockSteerEvalHi{}], and
+adding it moves deployment-framed prompts by \NlockSteerDeploy{}
+[\NlockSteerDeployLo{}, \NlockSteerDeployHi{}]. The response is graded: at
+$|\alpha| \le 1$, where the next-token distribution barely changes (KL from
+the unsteered distribution at most \NdoseKLsmall{} nats), the swing between
+$-1\sigma$ and $+1\sigma$ is \NswDsmall{} logits [\NswDsmallLo{},
+\NswDsmallHi{}] (Figure~\ref{fig:steer}a).
+
+Two yardsticks put those numbers in perspective.
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{The natural gap.} The locked steering effect is
+  \VsteerEvalOverGap{} natural gaps on evaluation-framed prompts and
+  \VsteerDeployOverGap{} on deployment-framed prompts. Steering at $4\sigma$
+  does roughly what changing the framing does; it does not flip the model
+  into a different regime.
+\item \textbf{Random directions.} One hundred random unit directions were
+  steered at the same norm and dose. The 95th percentile of their belief
+  swing across $\pm4\sigma$ is \VrandPninetyfiveBig{} logits (\VrandPninetyfiveOverGap{}
+  natural gaps); $d$'s swing of \VswD{} sits at percentile \VpctDbig{} of
+  that null, and at percentile \VpctDsmall{} in the small-dose regime.
+  A random direction of this size is not a small perturbation of this
+  readout, so ``the model can be steered'' is only meaningful relative to
+  this floor.
+\end{itemize}
+Table~\ref{tab:interventions} carries both yardsticks for every model, and
+the verdict across models is this. The locked steering effect excludes zero on
+all \VnModels{} models, and it has the expected sign on all but
+\VinvertedModels{}, where subtracting the evaluation direction \emph{raises}
+the ``test'' score: the inverted-steering regime of \citet{torop2026inverted},
+now measured with a readout the model actually answers. Against the
+random-direction null the evaluation direction's swing sits between
+percentiles \VpctDmin{} and \VpctDmax{}; only \VselectiveModels{} beats
+the 95th. On the other models, ``this direction steers the answer'' and
+``a random direction of this size steers the answer'' cannot be told apart at
+this dose.
+
+\begin{figure}[t]\centering
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub2_dose.pdf}
+\caption{Dose-response at the steering-peak layer}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub2_register.pdf}
+\caption{Which direction moves the answer}
+\end{subfigure}
+\caption{(a) Stated belief against steering dose at the steering-peak
+layer (chosen on all data; on the primary model it coincides with the locked
+layer) for evaluation- and deployment-framed prompts; the grey line is the
+mean of three
+random directions at the same norm (the 100-direction null is in (b)). (b)
+Belief swing across $\pm4\sigma$ for the evaluation direction $d$, the
+in-corpus style direction, the neutral formality direction, and $d$ with each
+style direction projected out, against the 5--95\% band of 100 random
+directions.}
+\label{fig:steer}
+\end{figure}
+
+\section{Finding 4: the ``test'' direction is tangled with formality}\label{sec:register}
+
+Evaluation framings in this corpus are formal and deployment framings are
+casual, as they are in most such corpora and, arguably, in the world. So a
+direction that encodes formality would look like an evaluation direction.
+I built two formality directions. The \emph{in-corpus} one is the mean
+difference between the formal and casual deployment families (production
+metadata and task context versus casual user and personal stakes); it uses
+no evaluation prompts but is correlated with class by construction. The
+\emph{neutral} one wraps the training tasks in three formal and three casual
+phrasings that contain no evaluation or deployment content at all
+(``I would appreciate a precise answer to the following question'' versus
+``yo quick q'').
+
+On the primary model the cosine between $d$ and the in-corpus style direction
+at the steering layer is \VcosStyle{}, and with the neutral formality
+direction \VcosNeutral{}. Steering with each at matched norm
+(Figure~\ref{fig:steer}b) gives a swing of \VswStyle{} for in-corpus style
+(percentile \VpctStylebig{} of the random null) and \VswNeutral{} for
+neutral formality (percentile \VpctNeutralbig{}), against \VswD{} for $d$.
+Removing the neutral formality component from $d$ leaves \VfracNeutral{} of
+its swing at $4\sigma$ and \VfracNeutralSmall{} in the small-dose regime.
+Table~\ref{tab:register} repeats this on every model.
+
+\begin{table}[t]\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{%
+\IfFileExists{tables/register_v2.tex}{\input{tables/register_v2.tex}}{\todo{run make\_paper\_assets\_v2}}}
+\caption{Formality and the evaluation direction, per model, at the steering
+layer. Swings are across $\pm4\sigma$ at matched norm; the number in
+parentheses is the percentile of that swing within the 100-direction random
+null. ``d minus neutral style'' is $d$ with the neutral formality direction
+projected out.}
+\label{tab:register}
+\end{table}
+
+The point for practice is simple. If a steering vector is offered as
+evidence that a model can be made to believe it is being tested, the same
+experiment should be run with a formality vector. In this corpus the two are
+not separable by construction of the framings, and only the neutral direction
+lets one ask how much of the effect survives. Across models the neutral
+formality direction is positively aligned with $d$ everywhere (cosine
+\VcosNeutralMin{} to \VcosNeutralMax{}), and on \VneutralBeatsD{} it moves
+the ``am I being tested?'' answer more than $d$ itself while beating every one
+of the 100 random directions; on the other models its effect is inside the
+random null. Projecting it out of $d$ leaves \VfracNeutralMin{} to
+\VfracNeutralMax{} of $d$'s swing (above 100 percent where the removed
+component pointed against the effect; Table~\ref{tab:register}). The model on
+which steering is most clearly selective is also the model on which a
+formality vector with no evaluation content steers the answer best.
+
+\section{Finding 5: patching moves the answer, not the context}\label{sec:patch}
+
+\paragraph{The experiment.} Take an evaluation-framed prompt. Copy into it,
+at one layer, the residual stream of its deployment-framed twin over the
+shared suffix (task, placeholder turn, belief question, prefill). If the
+stated belief moves toward ``No,'' evaluation context has, in some sense,
+been transferred. On the primary model the effect grows with depth to
+\NpatchMax{} logits at layer \NpatchPeakLayer{} (Figure~\ref{fig:patch}a).
+
+\paragraph{The control that fooled me.} The usual control is to copy from an
+\emph{unrelated} prompt instead. I copied from a deployment-framed prompt of a
+different task. It produced the same curve: \NpatchCtrl{} at the same layer.
+I first read this as ``the effect is an artefact: copying any suffix disrupts
+the readout.'' Then I noticed that the control source was also a
+deployment-framed prompt. The matched patch and the control differed in task
+content but agreed in class, so their difference could only ever measure the
+effect of content. It could not measure the thing I cared about. This is the
+textbook bad-control mistake \citep{cinelli2022crash}: the control held fixed
+exactly the variable under study. Nothing in the patching literature told me
+to make it, and I do not claim anyone else has; but the ``unrelated prompt''
+control is common enough \citep{heimersheim2024patching,zhang2024bestpractices}
+that I think the trap is worth naming.
+
+\paragraph{The repair.} Complete the design. Four sources per destination:
+same class or other class, crossed with same task or other task. Then the
+source-class effect is the average over the two other-class cells minus the
+average over the two same-class cells, and the content effect is the
+transpose. At the primary model's maximum-effect layer over the readout span
+the class effect is \NmeClass{} logits [\NmeClassLo{}, \NmeClassHi{}]
+(\VclassFinalOverGap{} natural gaps at the final position), the content
+effect is \NmeContent{} [\NmeContentLo{}, \NmeContentHi{}], and their
+interaction, on the same scale, is \NixnMean{} [\NixnLo{}, \NixnHi{}]. The
+locked version, with the layer chosen on half the tasks and the effect
+estimated on the other half, is \NlockClass{} [\NlockClassLo{},
+\NlockClassHi{}] (\NlockClassN{} tasks). On the primary model both
+deployment-class sources move the answer and neither evaluation-class source
+does (Figure~\ref{fig:patch}b); on Qwen-7B the same-task evaluation source
+also moves it, so the clean four-cell picture is a primary-model result.
+The original ``artefact'' reading and the original ``causal transfer''
+reading were both answers to a question the control could not ask.
+
+\begin{figure}[t]\centering
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub2_patch_layers.pdf}
+\caption{The control tracks the effect}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub2_cells.pdf}
+\caption{The four source cells, plus task-span-only patches}
+\end{subfigure}
+\caption{Primary model (Qwen2.5-1.5B). (a) Change in stated belief when the
+shared suffix is patched from the matched deployment prompt (solid) and from
+an unrelated deployment prompt (dashed), by layer (\NpairsExpTwo{} pairs over
+\NclustersExpTwo{} tasks). (b) Completing the source design: both
+deployment-class sources move the answer, neither evaluation-class source
+does; task-span-only patches do nothing.}
+\label{fig:patch}
+\end{figure}
+
+\paragraph{Where the effect lives.} Splitting the patched span into the
+task tokens, the belief-question tokens, and the final position (the token
+right before the answer) shows that on the primary model the class effect is
+\NEvalFinal{} [\NEvalFinalLo{}, \NEvalFinalHi{}] at the final position,
+\NEvalQuestion{} [\NEvalQuestionLo{}, \NEvalQuestionHi{}] over the question
+tokens, and \NEvalTask{} [\NEvalTaskLo{}, \NEvalTaskHi{}] over the task tokens
+(Table~\ref{tab:position}; the reverse direction, patching evaluation sources
+into deployment prompts, is \NDeployFinal{} [\NDeployFinalLo{},
+\NDeployFinalHi{}] at the final position). The dominant span is the final
+position on \VlocusFinalModels{} and the belief-question tokens on
+\VlocusQuestionModels{}; the task tokens are never it. The honest reading is that
+patching mostly transplants the state from which the answer is about to be
+read out. That is close to what one should expect from overwriting the last
+residual three quarters of the way through the network, and I do not present it
+as a mechanism. The non-obvious part is the small effect of the task tokens,
+and it comes with a caveat: the destination's own framing tokens are never
+patched, so the model can always re-read them. Whether context is not routed
+through the task tokens, or is routed but overwritten when the model re-reads
+its framing, cannot be told apart with this design. The experiment that would
+tell them apart (patching the framing tokens, or cutting attention from the
+readout back to them) is the first item in Section~\ref{sec:next}.
+
+\begin{table}[t]\centering\footnotesize
+\IfFileExists{tables/position_v2.tex}{\input{tables/position_v2.tex}}{\todo{run make\_paper\_assets\_v2}}
+\caption{Source-class effect of patching by span and direction, all five
+models, at each model's maximum-effect layer (exploratory). \VposCells{}
+cells; \VposUncorrected{} exclude zero at the 5\% level uncorrected ($^{*}$)
+and \VposHolm{} after a Holm correction over all cells ($^{\dagger}$). Task
+tokens for different-task sources are, by construction, only the shared
+formatting tokens, so the pre-question column is a weak test of same-task
+transfer.}
+\label{tab:position}
+\end{table}
+
+\paragraph{Could ``class'' just mean ``far away''?} A deployment-class
+source might simply be farther from an evaluation destination in activation
+space than an evaluation-class source, so that the class effect is a
+distance effect. I re-ran the four-cell design with the per-position offset
+of every source rescaled to the smallest of the four cells, so that all four
+sit at the same distance and no patch is ever made larger. On the primary
+model the final-position class effect under this shrink-only matching is
+\NmatchConMinEvalFinal{} [\NmatchConMinEvalFinalLo{},
+\NmatchConMinEvalFinalHi{}] (unmatched: \NmatchUnEvalFinal{}). Part of the raw
+effect travels with the size of the offset; most does not. The full matched
+design, with selection and construction arms and every model, is in the
+repository (Experiment J); I keep one sentence of it here because it is a
+robustness check, not a finding.
+
+\section{Finding 6: almost nothing reaches behaviour on these tasks}\label{sec:behaviour}
+
+Twenty-four held-out multiple-choice items were answered under evaluation and
+deployment framing, each with and without a system prompt that gives the model
+a reason to underperform (``models that demonstrate high capability undergo
+additional restriction''). On the primary model the framing effect on
+accuracy (deployment minus evaluation, averaged over the two system prompts)
+is \NframingME{} [\NframingMELo{}, \NframingMEHi{}] and the incentive effect
+(incentive minus neutral, averaged over framings) is \NincentiveME{}
+[\NincentiveMELo{}, \NincentiveMEHi{}], on \NsandbagNitemsME{} items; the
+other models are in Table~\ref{tab:interventions}, where the framing effect
+excludes zero only on \VframingSigModels{}. Steering $d$ hard enough to move
+the stated belief by \NswingDBelief{} logits moves accuracy by
+\NswingDAcc{}. Apart from the Olmo cell, these are bounded nulls on trivia
+questions that give the models no reason to sandbag; they are consistent with
+\citet{knecht2026limited} and \citet{li2026decomposing} and I claim nothing
+beyond that.
+
+\section{What I got wrong, in order}\label{sec:process}
+
+This is the part of the project I would want a reader to judge.
+\begin{enumerate}[leftmargin=1.4em]
+\item I ran the standard patching experiment and got a clean, growing
+  late-layer effect. I believed it.
+\item The unrelated-prompt control reproduced it. I believed the opposite:
+  that the whole thing was disruption of the readout span.
+\item Completing the source design showed both beliefs rested on a contrast
+  that held class fixed. The class effect was real; the control had been
+  measuring content.
+\item An exclusion rule in the pairing code (a two-token margin) had been
+  keeping only 13 of 30 tasks on the Qwen models and Olmo but 24 of 30 on
+  Phi-3, so the models were being compared on different tasks. Found by
+  asking why one model had more usable pairs than another; fixed by fixing
+  one task list for all models.
+\item The readout itself was answered only rarely or never by three of the
+  five models (Section~\ref{sec:asking}). Found by finally printing the
+  tokens the models actually produced. Every cross-model causal claim was
+  re-run.
+\item Effects had been reported without the model's own natural gap or a
+  random-direction floor beside them, which made a scaling story out of what
+  is mostly the readout's dynamic range growing with model size.
+\end{enumerate}
+The common thread is that every one of these was visible in files I already
+had. The cure each time was the same: look at the raw thing the number is
+computed from.
+
+\section{Limitations}\label{sec:limits}
+
+One synthetic English corpus of \NContents{} short tasks; every causal
+interval is a bootstrap over the \NclustersExpTwo{} held-out tasks, and the
+locked estimates use half of those. Five models of at most 8B parameters
+from three labs. One readout question, in two polarities. The readout is a
+stated answer, not a belief; the placeholder assistant turn is artificial,
+chosen so that prompt pairs stay aligned. Patching experiments use one
+polarity of the question. Bootstrap intervals here are percentile intervals,
+which tend to under-cover at these sample sizes, and the positional table
+reports \VposCells{} cells, so individual
+marginal cells should be read with the Holm markers, not without them. The
+probe result is nearly available after one layer, so nothing here speaks to
+evaluation awareness that requires reasoning about the situation. An
+all-layer direction-ablation experiment was run and is excluded from every
+claim: its random-direction control moved the outcome more than the
+treatment, which I read as generic damage collapsing the readout's range
+rather than as evidence about $d$, but I did not diagnose it. Two further
+things I do not explain: why Phi-3's direction steers the answer the wrong way
+at its locked layer (and alternates sign across layers), and why the smallest
+model's steering is so asymmetric between framings. Finally, the ``natural
+gap'' yardstick inflates on a model whose gap is small, as on Qwen-0.5B, so
+raw and gap-scaled effects are always reported together.
+
+\section{What I would do next}\label{sec:next}
+
+\begin{enumerate}[leftmargin=1.4em]
+\item \textbf{Patch the framing, not only the suffix.} The upstream null
+  becomes interpretable only when the destination's framing tokens are
+  patched too, or attention from the readout back to them is cut.
+\item \textbf{Find the heads that write the answer state.} Attribution
+  patching and node verification exist in the repository (Experiment E) and
+  were run under the old readout; re-run under the new one and report which
+  components carry the class signal into the final position.
+\item \textbf{More nuisance directions.} Politeness, length, presence of a
+  system prompt, imperative mood: each gets the same treatment as formality.
+\item \textbf{Tasks with a reason to sandbag}, and models large enough to
+  have one.
+\item \textbf{Survey the controls in published patching work.} Coding twenty
+  papers on what their control source holds fixed would turn
+  Section~\ref{sec:patch}'s cautionary tale into a measured claim.
+\end{enumerate}
+
+\section{Related work}
+
+Evaluation awareness: decodability, steering, scaling, and dissociations
+\citep{needham2025evaluated,nguyen2025probing,abdelnabi2025linear,heidari2026evalaware,hua2026steering,chaudhary2025scaling,manek2026depth,nayan2026notone,knecht2026limited,li2026decomposing};
+format sensitivity of probes \citep{devbunova2026format}. Patching practice
+and its pitfalls \citep{heimersheim2024patching,wang2022ioi,zhang2024bestpractices,makelov2024illusion};
+the estimand of a control contrast is the ``bad control'' problem of causal
+inference \citep{cinelli2022crash}, and interchange interventions formalise
+what a patch identifies \citep{vig2020causal,geiger2021causal}. Steering
+validity, including inverted steering vectors
+\citep{torop2026inverted,zou2023repe,turner2023activation,rimsky2023caa,arditi2024refusal}.
+
+\section{Disclosure and verification}\label{sec:disclosure}
+\textbf{Tools.} Code, orchestration, drafting and several rounds of
+automated auditing were done with substantial help from Anthropic's Claude
+(Claude Code); written critiques from OpenAI's ChatGPT/Codex shaped an earlier
+version. The readout-validity check that changed the project was an
+automated audit's finding, verified by me.
+
+\textbf{What I personally designed, read, and checked.}
+
+\textbf{Designed by me, and not.} My hypothesis is that a model can show
+evaluation awareness in different ways, and those ways are not necessarily
+the same: the model might internally represent that it is being tested, say
+that it is being tested, and still not change its behaviour. For the control,
+I first patched from an unrelated prompt, but I later realised that was not a
+good control because the source was still from the same evaluation or
+deployment class. So I changed it to a 2$\times$2 test in which I varied both
+the class and the task. That let me separate the effect of evaluation context
+from the effect of task content. The distance-matched arms answered a
+reviewer objection; the readout-validity check, the two-turn readout, and the
+calibration against the natural gap and a random-direction null came from
+automated audits, which I then verified.
+
+\textbf{Code read end to end.} I read the code that builds the belief prompt,
+computes the belief score, performs steering, ablation and patching, runs the
+positional 2$\times$2 experiment, and computes the bootstrap statistics.
+
+\textbf{Prompts inspected by hand.} I inspected a sample of prompt pairs and
+their recorded scores. I checked that the evaluation and deployment framings
+rendered correctly, that the belief question appeared in its own turn, and
+that the score usually moved in the expected direction.
+
+\textbf{Numbers I recomputed myself.} I used a separate script, which shares
+no code with the one that writes this paper's macros, to recompute the main
+results directly from the per-item files.
+
+\textbf{What remains unchecked.} Some experiments have not been re-run with
+the corrected readout, so I do not use them for any claim in this paper. I
+also still do not understand some results, such as Phi-3 steering in the
+opposite direction and the asymmetric steering in Qwen2.5-0.5B. I have not
+inspected all raw outputs from Olmo and Phi-3 by hand, and I have not
+independently tested the bootstrap coverage.
+
+\textbf{Time.} About 25 hours of active work, from 2 August to 2 September,
+covering code development and running the experiments. Time spent reading
+papers and mechanistic-interpretability learning material is not included.
+
+\textbf{Other contributors.} None.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Cue families}
+\IfFileExists{tables/cue_families.tex}{\input{tables/cue_families.tex}}{\todo{assets}}
+
+\section{Data accounting and statistics}
+Layer sweeps use \NpairsExpTwo{} evaluation/deployment pairs over
+\NclustersExpTwo{} held-out tasks. The four-cell patching designs use one
+fixed list of \NclustersFone{} held-out tasks on every model, chosen before
+any effect was computed; renderings whose framing places text after the task
+are excluded from all patching pairs because they do not share the task
+tokens with their twin. Every interval is a percentile bootstrap that
+resamples tasks (2000 draws). Locked estimates select the layer on the
+even-indexed half of the tasks and estimate on the odd-indexed half. The
+positional table's Holm correction is over all its cells at once.
+
+\end{document}

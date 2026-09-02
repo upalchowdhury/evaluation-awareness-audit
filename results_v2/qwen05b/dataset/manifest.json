@@ -1,0 +1,80 @@
+{
+  "experiment": "dataset",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "model_dtype": null,
+  "time": "2026-09-01T20:22:18",
+  "python": "3.11.15",
+  "torch": "2.13.0",
+  "transformer_lens": "3.8.0",
+  "config": {
+    "model": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "short": "qwen05b",
+      "device": "auto",
+      "dtype": "float32",
+      "batch_size": 16,
+      "gen_batch_size": 1,
+      "max_new_tokens": 48
+    },
+    "data": {
+      "seed": 0,
+      "n_contents": 60,
+      "templates_per_family": 3,
+      "test_content_frac": 0.5,
+      "grid_prompts": 96,
+      "grid_last_k": 48
+    },
+    "probes": {
+      "cv_folds": 5,
+      "n_permutations": 200,
+      "c_reg": 1.0
+    },
+    "interventions": {
+      "alpha_sweep": [
+        -8.0,
+        -6.0,
+        -4.0,
+        -2.0,
+        -1.0,
+        -0.5,
+        0.0,
+        0.5,
+        1.0,
+        2.0,
+        4.0,
+        6.0,
+        8.0
+      ],
+      "n_belief_pairs": 60,
+      "layer_stride": 1,
+      "top_layers": 3,
+      "n_random_controls": 3
+    },
+    "behaviors": {
+      "n_capability_items": 24,
+      "n_capability_sweep_items": 16,
+      "n_sycophancy_items": 16,
+      "n_refusal_items": 20,
+      "n_selfreport_items": 8,
+      "refusal_alphas": [
+        -4.0,
+        0.0,
+        4.0
+      ]
+    },
+    "attribution": {
+      "model_override": null,
+      "n_pairs": 32,
+      "top_k": 20,
+      "n_verify_pairs": 24,
+      "n_behavior_verify_items": 16,
+      "n_random_dirs": 20
+    },
+    "output_dir": "results_v2",
+    "paper_dir": "paper"
+  },
+  "n_prompts": 1640,
+  "n_train": 810,
+  "n_test": 810,
+  "n_special": 20
+}

@@ -1,0 +1,51 @@
+# Default experiment configuration.
+# Model-specific overrides live in configs/models/*.yaml and are deep-merged on top.
+
+model:
+  name: Qwen/Qwen2.5-7B-Instruct
+  short: qwen7b
+  device: auto            # auto | mps | cuda | cpu
+  dtype: auto             # auto | float32 | float16 | bfloat16
+  batch_size: 8           # logit-readout batch size (reduce if you OOM)
+  gen_batch_size: 1       # generation is run per-item for robustness
+  max_new_tokens: 48
+
+data:
+  seed: 0
+  n_contents: 60              # content items in the probe corpus
+  templates_per_family: 3     # cue templates sampled per (content, family)
+  test_content_frac: 0.5      # held-out content items (no probe ever trains on them;
+                              # all causal + behavior experiments run on these)
+  grid_prompts: 96            # prompts for the full (layer x position) grid
+  grid_last_k: 48             # token positions kept, aligned to the end
+
+probes:
+  cv_folds: 5
+  n_permutations: 200         # label-permutation test at the best layer
+  c_reg: 1.0                  # inverse L2 strength for logistic probes
+
+interventions:
+  alpha_sweep: [-8.0, -6.0, -4.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 4.0, 6.0, 8.0]
+  n_belief_pairs: 60          # eval/deploy pairs for the layer-sweep (Exp A)
+  layer_stride: 1             # stride over layers in sweeps (2 halves runtime)
+  top_layers: 3               # best layers carried into behavior experiments
+  n_random_controls: 3        # random-direction controls per steering condition
+
+behaviors:
+  n_capability_items: 24      # MC items for the sandbagging suite
+  n_capability_sweep_items: 16  # items for the per-layer behavior-patching sweep
+  n_sycophancy_items: 16
+  n_refusal_items: 20
+  n_selfreport_items: 8
+  refusal_alphas: [-4.0, 0.0, 4.0]   # generation is slow; keep this small
+
+attribution:
+  model_override: null        # e.g. Qwen/Qwen2.5-1.5B-Instruct to run E1-E3 on a smaller model
+  n_pairs: 32
+  top_k: 20                   # nodes ranked by |attribution| carried to causal verification
+  n_verify_pairs: 24
+  n_behavior_verify_items: 16
+  n_random_dirs: 20           # baseline for the E3 weight-space read scores
+
+output_dir: results
+paper_dir: paper

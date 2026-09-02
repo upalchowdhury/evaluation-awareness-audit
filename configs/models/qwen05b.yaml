@@ -1,0 +1,6 @@
+# Smallest replication point (ungated). fp32: gradients trustworthy for exp6.
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  short: qwen05b
+  batch_size: 16
+  dtype: float32

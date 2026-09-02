@@ -1,0 +1,521 @@
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{subcaption}
+\frenchspacing
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\tofill}[1]{\textcolor{red}{[TO FILL: #1]}}
+
+% Auto-generated numbers (python scripts/make_paper_assets.py --model qwen15b --compare ...)
+\IfFileExists{numbers.tex}{\input{numbers.tex}}{\newcommand{\NModel}{\todo{model}}}
+
+\title{\vspace{-2em}What Does the Control Control For?\\\large Estimand mismatch in activation patching, with evaluation awareness as the case study\vspace{-0.4em}}
+\author{\tofill{author name}\thanks{Code, corpus, and every result file:
+\tofill{public repository URL}. Every number below regenerates from two commands.
+LLM assistance is disclosed in \S\ref{sec:disclosure}.}}
+\date{\vspace{-1.5em}}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\section*{Executive summary}
+\textbf{The question.} Open-weight language models linearly encode whether
+they are being evaluated \citep{nguyen2025probing,heidari2026evalaware}.
+Activation patching is the usual next step for turning that correlation into
+a causal claim. I asked whether patching demonstrates transfer of evaluation
+\emph{context} --- and whether the control I reached for measured what I
+thought it measured.
+
+\textbf{The observation that changed the project.} Patching the shared
+suffix of a matched deployment prompt into an evaluation prompt moved the
+model's verbalized belief by \NpatchMax{} logits at deep layers. My control
+--- the same patch sourced from an unrelated prompt --- reproduced the entire
+curve (Fig.~\ref{fig:exec}a). I initially read that as refutation. Both
+readings turn out to rest on an \emph{estimand mismatch}: my paired and
+unpaired sources were both deployment-class prompts, so their difference held
+fixed exactly the factor I wanted to estimate, and could only ever measure
+content-matching effects.
+
+\begin{figure}[h]\centering
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub_patch_layers.pdf}
+\caption{The observation}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub_cells.pdf}
+\caption{The diagnosis}
+\end{subfigure}
+\caption{(a) The unpaired control reproduces the matched patch effect
+(Qwen2.5-1.5B; \NpairsExpTwo{} prompt pairs over \NclustersExpTwo{} held-out
+content clusters; bands are content-clustered bootstrap CIs). (b) Completing
+the source design to a 2$\times$2 of (class $\times$ content): both
+deploy-class sources (top two bars) produce the effect and both eval-class
+sources do not. My original contrast compared only the top two bars, and so
+cancelled the class effect.}
+\label{fig:exec}
+\end{figure}
+
+\textbf{The repaired analysis and the honest finding.} With all four source
+cells, the estimated source-class effect at the readout span is
+\NmeClass{} [\NmeClassLo{}, \NmeClassHi{}] logits; the content effect
+(\NmeContent{} [\NmeContentLo{}, \NmeContentHi{}]) and the
+class$\times$content interaction (\NixnMean{} [\NixnLo{}, \NixnHi{}]) are
+not detectably different from zero. The class effect grows across
+Qwen2.5-\{0.5B, 1.5B, 7B\} while the paired-minus-unpaired contrast stays
+statistically indistinguishable from zero at every scale
+(Table~\ref{tab:sensitivity}). Splitting the patched region finer shows what
+the class signal is: on the primary model it is concentrated at the final
+pre-answer position (\NEvalFinal{} [\NEvalFinalLo{}, \NEvalFinalHi{}];
+reverse direction \NDeployFinal{} [\NDeployFinalLo{}, \NDeployFinalHi{}];
+maximum-effect layer --- exploratory, locked analog in
+Sec.~\ref{sec:confound}),
+with the pre-question tokens contributing \NEvalTask{}
+[\NEvalTaskLo{}, \NEvalTaskHi{}]. Across five models the pattern is
+\emph{predominantly} report construction, with smaller but detectable
+upstream transfer --- an order of magnitude below the final-position effect
+--- at the question and pre-question tokens on the larger Qwen models
+(Table~\ref{tab:position}). What patches move is mostly the state from which
+the model is about to read out its answer, not evaluation-context processing
+upstream of it. Both my original readings --- ``causal localization of
+awareness'' and ``pure artifact'' --- were answers to a question my contrast
+never asked.
+
+\textbf{Strongest evidence against my interpretation.} (i) The class effect
+could have reflected source--destination distance rather than class; a
+matched design now bounds this --- with all four source cells at identical
+per-position residual distance and only shrunk offsets, the effect stands at
+\NmatchConMinEvalFinal{} [\NmatchConMinEvalFinalLo{},
+\NmatchConMinEvalFinalHi{}] (Sec.~\ref{sec:confound}) --- though the
+constructed estimand is the offset-direction effect at standardized dose,
+not the raw class effect re-measured. (ii) Upstream transfer is
+not absent: on Qwen-7B the question tokens carry $+0.24$ $[+0.11, +0.37]$ in
+one direction and the same-content pre-question contrast is detectable in
+both directions ($-0.10$ $[-0.18, -0.02]$ and $+0.16$ $[+0.06, +0.26]$),
+and on the primary model the question tokens carry $-0.11$
+$[-0.18, -0.04]$, so ``report construction'' is a predominance claim, not an
+exclusivity claim. (iii) An all-layer
+direction-ablation experiment was unstable under its own random control (the
+control moved the outcome more than the treatment); I draw no conclusions
+from it. (iv) A second-concept replication (register) was null on the primary model
+and directional but not significant at 7B.
+
+\textbf{Narrowest honest limitation.} One synthetic English corpus,
+\NclustersExpTwo{} held-out content clusters, one readout question, models
+$\le$8B; and the ``class transfer'' I localize is a property of a verbal
+report --- I found no route from any of it to task behavior (sandbagging gaps
+null or marginal on all five models).
+
+\section{Setup, in brief}\label{sec:setup}
+\textbf{Corpus and models.} \NContents{} task items rendered under five
+evaluation and four deployment cue families (a no-lexicon exam family,
+structurally matched metadata families, topic controls), split 50/50 into
+train/test by content. Models: Qwen2.5-\{0.5B, 1.5B, 7B\}-Instruct,
+Phi-3-mini-4k-instruct, Olmo-3-7B-Instruct (TransformerLens, Apple silicon);
+primary model for in-text numbers: Qwen2.5-1.5B-Instruct in fp32. The
+representational result of prior work reproduces here (held-out probe AUC
+\NprobeAUC{}, permutation $p$ = \NpermP{}, computed at the selected layer and uncorrected for the max over layers (the permutation null's 95th percentile, 0.54 AUC, leaves any corrected version equally decisive); no-lexicon family transfer
+\NsubtleAUC{}; topic-control false-positive rate \NtopicFPR{} against
+\NevalRate{} for genuine evaluation framings) and I claim no novelty for it
+\citep{nguyen2025probing,heidari2026evalaware,devbunova2026format}.
+
+\textbf{Readout and direction.} The verbalized belief is a two-polarity
+yes/no question appended after the task, scored from the first-answer-token
+logits at the final input position (positive = ``I am being evaluated'');
+$d_\ell = \mu^{\mathrm{eval}}_\ell - \mu^{\mathrm{deploy}}_\ell$
+(unit-normalized), steering doses in units of $\sigma_\ell$. ``Final
+pre-answer position'' below means that last input position: no answer token
+has been generated when it is patched.
+
+\textbf{Data accounting.} Layer sweeps: \NpairsExpTwo{} pairs over
+\NclustersExpTwo{} content clusters; all CIs are content-clustered
+bootstraps. Wherever a selected layer feeds a confirmatory estimate and that
+layer was among those run, I report a locked version --- layer selected on a
+discovery half of the clusters, effect re-estimated with a clustered
+bootstrap on the other half (``locked''; 15 clusters each side; the one gap,
+Phi-3, is named in \S\ref{sec:limits}); layers labeled maximum-effect were
+selected on all data, and estimates at them are exploratory. \emph{Attrition and its repair:} an
+earlier version of the 2$\times$2 required different-content sources to
+share the readout span plus a two-token margin; on the Qwen and Olmo
+tokenizers those sources share the readout span plus exactly one glue token,
+so 34 of 60 candidate pairs were excluded (0 of 24 on Phi-3), leaving 13
+clusters and model-dependent content subsets. The criterion was
+tokenizer-determined and effect-blind (\texttt{results/attrition.json}), but
+it made the models incomparable. All 2$\times$2 estimates reported here
+therefore use one fixed list of the same \NclustersFone{} held-out contents
+on every model, with the margin removed (readout span fully shared is the
+only requirement). For different-content sources the content-specific pre-question tokens are
+not shared by construction (only glue tokens and, for multiple-choice items,
+the shared answer-format instruction survive the suffix match), so in the
+tabulated pre-question column the two different-content cells are near-empty
+patches and the 2$\times$2 main effect understates the same-content
+pre-question contrast by roughly half (primary model: $-0.07$
+$[-0.13, -0.01]$ same-content vs.\ \NEvalTask{} [\NEvalTaskLo{}, \NEvalTaskHi{}]
+tabulated).
+
+\section{The estimand mismatch}\label{sec:confound}
+\textbf{What my contrast estimated.} Let $Y_{c,s}$ be the patch effect from
+a source of class $c \in \{\mathrm{same}, \mathrm{other}\}$ relative to the
+destination and content $s \in \{\mathrm{same}, \mathrm{other}\}$. The
+matched patch is $Y_{\mathrm{other},\mathrm{same}}$; my unpaired control was
+$Y_{\mathrm{other},\mathrm{other}}$. Their difference holds source class
+fixed: it estimates the content-matching effect plus the class$\times$content
+interaction and is structurally incapable of estimating a class effect. I
+make no claim that the literature formally defines this contrast as a class
+estimator; what I am reporting is the inference I made, which I believe is
+tempting for anyone who reaches for an unrelated-prompt control
+\citep{heimersheim2024patching,zhang2024bestpractices} --- read a large
+matched effect as concept transfer, read a matching control as refutation
+--- and which the design cannot license either way. It is distinct from
+corruption-choice sensitivity \citep{zhang2024bestpractices} and from
+subspace-patching illusions \citep{makelov2024illusion}; the nearest
+analogue is over-control.
+
+\textbf{The full factorial.} Adding the two same-class cells gives, at the
+primary model's maximum-effect layer and readout span: estimated
+source-class effect \NmeClass{} [\NmeClassLo{}, \NmeClassHi{}]; content
+effect \NmeContent{} [\NmeContentLo{}, \NmeContentHi{}]; interaction
+\NixnMean{} [\NixnLo{}, \NixnHi{}] (not detectable --- the condition under
+which the simpler paired-minus-same-class contrast, \NReadContent{}
+[\NReadContentLo{}, \NReadContentHi{}], is a clean class estimate). Because
+that layer was chosen on all data, I also report a locked estimate: the
+patch layer selected on the discovery half of the contents (layer
+\NlockClassLayer{}, which coincides with the all-data choice), estimated on
+the estimation-half contents only: \NlockClass{}
+[\NlockClassLo{}, \NlockClassHi{}] (\NlockClassN{} clusters). Table~\ref{tab:sensitivity}
+repeats the decomposition on five models: the class effect spans a wide
+range while the paired-minus-unpaired contrast never leaves a
+zero-straddling band. The class effect is depth-ordered ($\rho$ =
+\NartifactDepthRho{}) and concentrates late --- the mismatch bites hardest
+exactly where naive patching looks most impressive.
+
+\begin{table}[t]\centering\small
+\IfFileExists{tables/estimator_sensitivity.tex}{\input{tables/estimator_sensitivity.tex}}{\todo{assets}}
+\caption{The paired-minus-unpaired contrast does not respond to the estimated
+source-class effect. Both columns: readout span at each model's
+maximum-patch-effect layer (selected on all data --- exploratory; the locked
+estimates are in Table~\ref{tab:landscape}), the same \NclustersFone{}
+content clusters on every model, content-clustered bootstrap CIs.}
+\label{tab:sensitivity}
+\end{table}
+
+\textbf{Where the class signal sits.} Splitting the patched region ---
+pre-question task tokens, belief-question tokens, final pre-answer position
+--- in both patch directions on all five models (Table~\ref{tab:position})
+gives a predominance result, not an exclusivity result. On the primary model
+the signal is concentrated at the final pre-answer position (\NEvalFinal{}
+[\NEvalFinalLo{}, \NEvalFinalHi{}] vs.\ question
+\NEvalQuestion{} [\NEvalQuestionLo{}, \NEvalQuestionHi{}] and pre-question
+\NEvalTask{} [\NEvalTaskLo{}, \NEvalTaskHi{}]); the locked analog
+(discovery-half layer, estimation-half clusters) gives \NlockFinalEval{}
+[\NlockFinalEvalLo{}, \NlockFinalEvalHi{}] and, in the reverse direction,
+\NlockFinalDeploy{} [\NlockFinalDeployLo{}, \NlockFinalDeployHi{}]; the locus differs by model
+(question tokens on the smallest Qwen and on Olmo; final pre-answer position
+on the larger Qwen models; every cell zero on Phi-3), and smaller upstream
+transfer is detectable on the larger Qwen models --- always an order of
+magnitude below the dominant position.
+The interpretation I consider honest: patching mostly transplants the state
+from which the model is about to read out its report --- constructed by the
+final pre-answer position on larger Qwen models, still distributed over the
+question tokens at 0.5B --- with a minority of transfer that is genuinely
+upstream. Olmo also splits the region in a way that explains its steering
+anomaly (\S\ref{sec:landscape}): large normal-signed transfer at the
+question tokens and, in one patch direction, sign-inverted transfer at the
+final pre-answer position, so instruments that weight positions differently
+must disagree.
+
+\begin{table}[t]\centering\footnotesize
+\IfFileExists{tables/position_models.tex}{\input{tables/position_models.tex}}{\todo{assets}}
+\caption{Estimated source-class effect by patched position, both patch
+directions, all five models (maximum-effect layer, selected on all data ---
+exploratory; locked final-position analogs in the text; the same \NclustersTen{}
+content clusters per row on every model; content-clustered CIs).}
+\label{tab:position}
+\end{table}
+
+\textbf{Distance is matched by construction.} Per-cell source--destination
+residual distances were recorded for every patch, and observationally they
+cut against a distance account (the inert same-class/different-content
+source lies \emph{farther}, $\ell_2$ = \NdistSameDiff{}, than the potent
+other-class/same-content source, \NdistPaired{}). Because that is a check
+and not a design, I re-ran the full 2$\times$2 with distance handled by
+construction (Experiment J): same destinations, patched spans equalized
+across the four cells, same clustered estimator, \NmatchClusters{} clusters
+per destination class (unmatched baseline under this discipline:
+\NmatchUnEvalFinal{} [\NmatchUnEvalFinalLo{}, \NmatchUnEvalFinalHi{}] /
+\NmatchUnDeployFinal{} [\NmatchUnDeployFinalLo{}, \NmatchUnDeployFinalHi{}],
+reproducing the published estimates). Distances are functions of activations
+fixed before any intervention, so matching on them is outcome-blind
+covariate matching; exact balance among \emph{real} activations is
+nevertheless geometrically impossible if class is linearly encoded (an
+other-class source has a distance floor), so selection serves as the
+on-manifold check and construction as the primary instrument.
+\emph{Distance-selected} (best of \NmatchK{} candidate renderings per cell,
+chosen --- before any effect is computed --- to zero the class-condition
+distance gap; achieved gap \NmatchSelGapEval{} vs.\ \NmatchUnGapEval{}
+unmatched, eval destinations): class effect \NmatchSelEvalFinal{}
+[\NmatchSelEvalFinalLo{}, \NmatchSelEvalFinalHi{}] /
+\NmatchSelDeployFinal{} [\NmatchSelDeployFinalLo{},
+\NmatchSelDeployFinalHi{}]. \emph{Distance-constructed} (each source's
+per-position offset rescaled to the four-cell mean norm, so all four cells
+sit at identical $\ell_2$ distance at every patched position; mean rescale
+\NmatchScale{}): \NmatchConEvalFinal{} [\NmatchConEvalFinalLo{},
+\NmatchConEvalFinalHi{}] / \NmatchConDeployFinal{}
+[\NmatchConDeployFinalLo{}, \NmatchConDeployFinalHi{}].
+\emph{Shrink-only construction} (rescale to the four-cell \emph{minimum}
+norm: every patched state is a convex interpolation toward the destination,
+no offset is ever amplified, so rescaling can only attenuate whatever the
+offset carries --- the conservative primary, decision rule committed before
+the runs): \NmatchConMinEvalFinal{} [\NmatchConMinEvalFinalLo{},
+\NmatchConMinEvalFinalHi{}] / \NmatchConMinDeployFinal{}
+[\NmatchConMinDeployFinalLo{}, \NmatchConMinDeployFinalHi{}]. The locked
+versions (discovery-half layer \NmatchLockLayer{}, estimation-half
+clusters, $n$ = \NmatchLockConMinN{}) stand: shrink-only \NmatchLockConMin{}
+[\NmatchLockConMinLo{}, \NmatchLockConMinHi{}], selected \NmatchLockSel{}
+[\NmatchLockSelLo{}, \NmatchLockSelHi{}]. Balance also holds in a
+unit-direction metric (matched-arm class-condition gaps below $0.005$ in
+every cell on every model and $\le 0.003$ at the final position; $0.002$ and
+$0.001$ on the primary model), so RMSNorm radial
+invariance does not hide an imbalance, and the rescale footprint --- the
+paired unmatched-minus-constructed change in each cell's own effect ---
+stays within $0.59$ logits across all cells, spans and layers on the
+primary model ($0.53$ at the final position) and within $1.85$ logits on any
+of the five, bounding what off-manifold distortion could contribute. Two scope notes: the
+constructed arms estimate the effect of the class-associated offset
+\emph{direction} at standardized per-position dose (equalizing magnitude
+removes any magnitude-mediated share of the raw effect along with the
+confounded share), and the selected arm re-matches per analysis cell; all
+arms share one survivor set of destinations, and the constructed arms reuse
+the unmatched sources. At matched --- and at identical --- residual
+distance, class still orders the effect (Table~\ref{tab:matched}). On the two
+models whose final-position class effect is detectable in \emph{both} patch
+directions the shrink-only estimate attenuates relative to the unmatched one (1.5B $-0.82
+\rightarrow -0.62$; 7B $-2.27 \rightarrow -1.26$) while excluding zero in
+both patch directions: part of the raw effect does travel with offset
+magnitude, and the majority does not. The result is not confined to that
+position. Qwen2.5-0.5B carries no final-position effect to match --- its
+locus is the belief-question span (\S\ref{sec:confound},
+Table~\ref{tab:position}) --- and matched over the readout span that
+contains that locus it replicates too: shrink-only $-0.25$ $[-0.32, -0.18]$
+and, in the reverse direction, $+0.15$ $[+0.09, +0.22]$ (Experiment J
+resolves final, readout and pre-question spans, not the question tokens
+alone). Table~\ref{tab:matched} therefore carries a
+readout-span column, so a model whose class effect does not sit at the
+final position is not represented by a row of zeros.
+
+\textbf{Where matching removes an effect.} Olmo-3-7B is the case the matched
+design argues against itself, and it is worth stating plainly. Its
+anomalous \emph{sign-inverted} final-position effect --- the one that
+mechanically explains its inverted steering (\S\ref{sec:landscape}) --- does
+not survive the conservative arm: unmatched $-0.50$ $[-0.91, -0.09]$
+(deploy destinations) becomes $-0.34$ $[-0.59, -0.09]$ when matched by
+selection, $-0.38$ $[-0.75, -0.00]$ when constructed, and $-0.07$
+$[-0.25, +0.11]$ under shrink-only construction, which no longer excludes
+zero. I read that inversion as partly a magnitude phenomenon rather than
+class transfer, and I do not claim it as a matched result. What does survive
+on Olmo is the effect at its own locus, the belief-question tokens, and it
+survives \emph{normal}-signed in both directions (shrink-only $-0.39$
+$[-0.61, -0.15]$ and $+0.53$ $[+0.27, +0.81]$ over the readout span). Phi-3-mini,
+which has no detectable class effect anywhere in the unmatched design, has
+none under matching either: every arm, span and direction stays within
+$0.01$ logits of zero at the maximum-effect layer and $0.04$ at every layer
+run --- a calibration check on the instrument rather than
+a replication. The pre-question task span stays
+\emph{small} under matching on all five models --- every matched estimate at
+the maximum-effect layer lies within $0.05$ logits of zero (largest,
+Qwen-7B shrink-only deploy destinations, $-0.05$ $[-0.09, -0.01]$) --- but
+several of those small values do exclude zero, so this reproduces the
+predominance claim of \S\ref{sec:confound} under matching, not an
+exclusivity claim. All five checkpoints have now completed Experiment
+J on the same \NmatchClusters{} content clusters per destination class.
+
+\begin{table}[t]\centering\footnotesize
+\IfFileExists{tables/matched_models.tex}{\input{tables/matched_models.tex}}{\todo{assets}}
+\caption{Distance-matched estimated source-class effects, both patch
+directions, for every model with a completed Experiment J run. The four estimate columns
+after the destination are the final pre-answer position; the last is the
+shrink-only estimate over the whole readout span (belief question $+$ final position),
+which contains every model's locus and so remains informative for models
+whose class effect does not sit at the final position. Maximum-effect layer
+--- exploratory; the locked shrink-only estimate is in the text;
+content-clustered CIs.}
+\label{tab:matched}
+\end{table}
+
+\textbf{Scope.} The same 2$\times$2 on a second concept (register, formality
+readout) gave a null class effect at 1.5B ($-0.08$ $[-0.45, +0.25]$) and a
+directional but non-significant one at 7B ($-0.41$ $[-1.09, +0.26]$; 12
+contents), so the estimand point generalizes by its logic --- a contrast
+that fixes the concept label cannot estimate that label's effect --- rather
+than by a second demonstrated instance.
+
+\section{Convergent evidence from steering}\label{sec:steering}
+Steering $\pm\alpha\sigma_\ell\hat d_\ell$ transplants no span. Held to a
+pre-specified battery --- a locked layer (selected on the discovery split;
+on the primary model it coincides with the all-data steering peak, at which
+the dose and percentile diagnostics below are computed), dense
+dose-response, distributional checks (KL from the unsteered next-token
+distribution at every dose), and a null of 100 matched-norm random directions
+over \NclustersReg{} clusters --- steering on the primary model moves the
+verbalized belief at the locked layer by \NlockSteerEval{}
+[\NlockSteerEvalLo{}, \NlockSteerEvalHi{}] (eval framing) and
+\NlockSteerDeploy{} [\NlockSteerDeployLo{}, \NlockSteerDeployHi{}] (deploy
+framing). I treat the low-KL regime ($|\alpha| \le 1$, KL $\le$
+\NdoseKLsmall{} nats) as primary: there the swing is \NswDsmall{}
+[\NswDsmallLo{}, \NswDsmallHi{}] and $|d|$ sits at the \NpctSmall{}th
+percentile of the random-direction null (Fig.~\ref{fig:steer}a). Large
+doses (mean KL \NdoseKLbig{} nats at $|\alpha| = 8$, averaged over framings)
+are reported as secondary. Steering and
+the repaired patching estimator agree in sign and rough magnitude on the
+Qwen family --- convergent evidence that the class variable is real and
+manipulable --- while remaining, like patching, interventions on what the
+model \emph{reports}: none of them measurably changed task behavior
+(\S\ref{sec:landscape}).
+
+\begin{figure}[t]\centering
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub_dose.pdf}
+\caption{Dose-response at the locked layer}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{.48\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/pub_register.pdf}
+\caption{Orthogonalized steering vs.\ the random null}
+\end{subfigure}
+\caption{(a) Steering dose-response at the locked layer; random-direction
+mean for comparison. (b) Matched-norm swings for the awareness direction, the
+style direction, and each orthogonalized to the other, against the
+5--95\% band of $|$swing$|$ over 100 random directions (secondary result,
+\S\ref{sec:register}).}
+\label{fig:steer}
+\end{figure}
+
+\section{Instrument validity across five models}\label{sec:landscape}
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{%
+\IfFileExists{tables/cross_model.tex}{\input{tables/cross_model.tex}}{\todo{assets}}}
+\caption{Five models, identical instruments and identical content clusters.
+``Locked steering'': held-out eval-framing estimate at the discovery-selected
+layer. Class effects: the 2$\times$2 estimate at the readout span, at the
+all-data maximum-effect layer (exploratory) and locked (layer selected on the
+discovery half of contents, estimated on the other half). Sandbagging CIs are paired and
+content-clustered ($n$ = \NsandbagNitems{} items per model).}
+\label{tab:landscape}
+\end{table}
+
+The encoding side is consistent everywhere (probe AUC 0.956--0.994 with
+format controls passing; the readout region dominates causal span maps in
+all five). The causal side is not. On Qwen, locked steering grows with scale
+($-0.29 \to -0.84 \to -2.20$) and the source-class effect grows with it. On
+Phi-3-mini nothing meaningfully moves the report: the largest eval-framing
+steering effect at any layer is $-0.030$ $[-0.044, -0.016]$ (deploy framing
+$+0.036$ $[+0.025, +0.049]$) --- two orders of magnitude below Qwen-7B ---
+and every 2$\times$2 cell is zero. On Olmo-3-7B, locked steering CIs exclude
+zero ($+0.32$ $[+0.12, +0.53]$ eval framing) with \emph{inverted} signs, and
+orthogonalized steering shows $d$, style, and random directions all moving
+the readout comparably --- the inverted-steering regime of
+\citet{torop2026inverted}, arising in the wild; effect-size-with-CI
+reporting would have passed it as replication. The positional split of
+\S\ref{sec:confound} explains the configuration (question tokens normal,
+final pre-answer position inverted in one direction), and the 2$\times$2
+still detects class transfer on Olmo. Instruments dissociate on the same model; that is the
+strongest argument I know for running all of them.
+
+Behavior, for context and consistent with prior work
+\citep{knecht2026limited,li2026decomposing}: incentivized sandbagging gaps
+are null with bounded CIs on four models (Qwen-7B: $-0.00$
+$[-0.03, +0.03]$; pooled Qwen: \NpooledGap{}
+[\NpooledGapLo{}, \NpooledGapHi{}]) and marginal on Olmo ($+0.054$
+$[-0.002, +0.126]$); steering the belief direction hard enough to move the
+report by a logit moves accuracy by \NswingDAcc{}.
+
+\section{Secondary result: the register share of the steerable signal}\label{sec:register}
+A style direction --- the mass-mean of formal-vs-casual framings, built
+from deployment-side prompts only --- is substantially aligned with $d$ in
+every model ($\cos$ = 0.46--0.68 at the steering layer). Steering with $d$,
+style, and each orthogonalized to the other at matched norm
+(Fig.~\ref{fig:steer}b) shows the style axis going from causally inert at
+0.5B (2\% of $d$'s swing; $d_{\perp\mathrm{style}}$ keeps 97\%) to parity
+with $d$ at 7B (64\% of $d$ surviving orthogonalization; in the low-KL
+regime on the primary model, \NfracDperpSmall{}). I report this as a
+within-family trend with caveats, not a scaling law: three sizes of one
+family; a style direction constructed from my own deployment framings, which
+is \emph{correlated with}, not guaranteed free of, evaluation-context
+information; and a random-direction floor that is a substantial fraction of
+$d$'s swing at small scale. Its value is as a causal-level counterpart to
+the probe-level format-sensitivity critique \citep{devbunova2026format}:
+belief-report controllability claims need register controls.
+
+\section{Related work}
+Evaluation awareness: decodability, steering, scaling, and dissociations
+\citep{needham2025evaluated,nguyen2025probing,abdelnabi2025linear,heidari2026evalaware,hua2026steering,chaudhary2025scaling,manek2026depth,nayan2026notone,knecht2026limited,li2026decomposing};
+format-sensitivity of probes \citep{devbunova2026format}. Patching
+methodology: corruption-type sensitivity \citep{zhang2024bestpractices},
+practice \citep{heimersheim2024patching,wang2022ioi}, subspace illusions
+\citep{makelov2024illusion}; the estimand of the control contrast is
+orthogonal to all three. Steering validity: inverted steering vectors
+\citep{torop2026inverted}; steering practice
+\citep{zou2023repe,turner2023activation,rimsky2023caa,arditi2024refusal}.
+
+\section{Limitations, and evidence against}\label{sec:limits}
+Report-construction predominance is a predominance claim: upstream transfer
+is detectable at the question and pre-question tokens on the larger Qwen
+models, an order of magnitude below the dominant position. Content and interaction
+``nulls'' are bounded, not negligible: a TOST-style equivalence analysis
+(90\% clustered bootstrap CIs; final position, maximum-effect layer;
+\texttt{scripts/equivalence\_bounds.py}) bounds the primary model's content
+and interaction effects within 0.42--0.63 logits, i.e.\ 0.51--0.72$\times$
+the class effect (both destinations), with 0.47--0.75$\times$ on Qwen-7B
+deploy destinations; on Olmo, and wherever the final-position class effect
+is itself undetectable, no informative equivalence claim is supportable.
+One cell is not a null at all: the Qwen-7B eval-destination interaction at
+the final position is detectably positive ($+1.93$ $[+0.35, +3.68]$, 95\%),
+so the same-content class contrast there is weaker than the
+different-content one. The maximum-effect layer was selected on all data; the locked estimates
+(discovery-half layer, estimation-half contents) agree but use 15 clusters,
+and are not computable for Phi-3 (whose discovery-selected layer was not
+among those run). An all-layer direction-ablation
+experiment was unstable under its own random control (control \NmlRdsep{}
+[\NmlRdsepLo{}, \NmlRdsepHi{}], treatment \NmlDdsep{}
+[\NmlDdsepLo{}, \NmlDdsepHi{}], not distinguishable from zero) and is
+excluded from all claims. The register replication did not reach
+significance. Behavioral nulls are bounded by 24-item suites. One corpus,
+synthetic, English; five models $\le$8B from three labs.
+
+\section{Disclosure and verification}\label{sec:disclosure}
+\textbf{Tools.} Code, experiment orchestration, and drafting were done with
+substantial assistance from Anthropic's Claude (Claude Code); the framing of
+the estimand critique and the list of blocking issues addressed in this
+version came from written critiques produced with OpenAI's ChatGPT/Codex.
+Multi-agent LLM audits cross-checked prose against result files; the errors
+they found are corrected here, and I do not treat them as a substitute for
+the personal verification below.
+
+\textbf{What I personally designed, read, and checked.}
+\tofill{which hypotheses and controls you designed yourself (e.g.\ the
+2$\times$2 completion, the locked split, the positional split)}.
+\tofill{which code paths you read end to end (e.g.\ patching hooks in
+\texttt{interventions.py} and \texttt{exp7}/\texttt{exp10}; the belief
+readout in \texttt{readouts.py})}.
+\tofill{how many raw prompts and readouts you inspected by hand
+(\texttt{scripts/sample\_audit.py}), and whether alignments and scores looked
+right}.
+\tofill{which headline numbers you independently recomputed from the CSVs
+(e.g.\ the class main effect, the interaction, one locked steering CI)}.
+\tofill{what remains unchecked}.
+\tofill{for each component --- corpus, patching, steering, statistics --- how
+surprised you would be by a major error, in one line each}.
+\tofill{total active hours, and a short decision timeline}.
+\tofill{exact contribution of anyone else who participated, or ``none''}.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

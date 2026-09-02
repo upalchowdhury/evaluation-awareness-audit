@@ -1,0 +1,5 @@
+# v2 run (2026-09-01): belief readout asked in a second turn with an
+# "Answer:" prefill (see evalaware/data/templates.py) after the audit found
+# that Qwen-7B / Olmo / Phi-3 never answered the appended question.
+# All v2 results land in results_v2/<short>/ so the v1 results stay intact.
+output_dir: results_v2

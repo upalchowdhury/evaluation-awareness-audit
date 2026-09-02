@@ -1,0 +1,23 @@
+# Optional fp32 variant of the primary model. NOT the default: bf16 was checked
+# and is adequate.
+#
+# Why the question arises: the belief readout is a logsumexp difference over raw
+# logits, so in bf16 it lands on the bf16 grid at logit magnitude (~0.125 for
+# logits in the 16-32 range). That is the same order as the control-corrected
+# effect we care about (~0.17 logits at 1.5B).
+#
+# Why bf16 is still fine: the quantisation is independent across prompts, so it
+# is noise, not bias. Over 60 pairs its contribution to the mean is
+# ~0.125/sqrt(12)/sqrt(60) ~ 0.005 logits, far below the effect.
+#
+# Use this config only for single-item or very-small-n measurements where the
+# per-measurement 0.125 grid would actually matter. fp32 weights are ~30 GB,
+# which fits in 96 GB; layer_stride 2 keeps the sweeps affordable.
+model:
+  name: Qwen/Qwen2.5-7B-Instruct
+  short: qwen7b_fp32
+  batch_size: 4
+  dtype: float32
+
+interventions:
+  layer_stride: 2

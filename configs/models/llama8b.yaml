@@ -1,0 +1,6 @@
+# Second 7-9B family for cross-model claims. Gated: accept the license on
+# HuggingFace and run `huggingface-cli login` first.
+model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  short: llama8b
+  batch_size: 8

@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this codebase, please cite it as below."
+title: "From Direction to Circuit: A Causal Decomposition of Evaluation Awareness in Language Models"
+version: 0.1.0
+date-released: "2026-08-27"
+authors:
+  - family-names: "TODO"
+    given-names: "TODO"
+repository-code: "https://github.com/TODO/direction-to-circuit"
+license: MIT

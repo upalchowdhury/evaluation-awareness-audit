@@ -1,0 +1,30 @@
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+# Run logs
+logs/
+
+# Raw results are large (activation caches dominate). The verification subset
+# -- every summary.json/manifest.json and the per-item CSVs the paper's numbers
+# are computed from -- is force-added; see README "Verify it yourself".
+results/
+results_v2/
+
+# LaTeX build artefacts (the PDFs themselves are tracked)
+paper/*.aux
+paper/*.log
+paper/*.bbl
+paper/*.blg
+paper/*.out
+paper/*.xdv
+paper/*.synctex.gz
+
+# Superseded intermediate drafts (the v1 paper, paper/main.tex, is kept)
+paper/main_full.tex
+paper/main_v2_confound.tex

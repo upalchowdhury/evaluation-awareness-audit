@@ -1,0 +1,62 @@
+{
+  "best_layer": 5,
+  "layers_ranked": [
+    5,
+    1,
+    6,
+    7,
+    2,
+    8,
+    0,
+    4,
+    3,
+    9,
+    12,
+    10,
+    13,
+    11,
+    23,
+    14,
+    22,
+    15,
+    21,
+    20,
+    19,
+    17,
+    16,
+    18
+  ],
+  "best_test_auc": 0.967358024691358,
+  "verbal_auc": 0.8175493827160494,
+  "repr_verbal_spearman": 0.37579695656815115,
+  "permutation": {
+    "observed_auc": 0.935530864197531,
+    "p_value": 0.004975124378109453,
+    "null_mean": 0.5014248707240813,
+    "null_q95": 0.5331987812980732
+  },
+  "controls": {
+    "threshold": -0.7051961421966553,
+    "eval_rate_test_eval": 0.8488888888888889,
+    "eval_rate_test_deploy": 0.10277777777777777,
+    "eval_rate_topic_controls": 0.0,
+    "eval_rate_ambiguous": 0.0
+  },
+  "readout_validity": {
+    "yesno_mass_mean": 0.9994754195213318,
+    "yesno_mass_min": 0.9892759323120117,
+    "greedy_yesno_frac": 1.0,
+    "greedy_yesno_frac_eval": 1.0,
+    "greedy_yesno_frac_deploy": 1.0
+  },
+  "natural_gap": {
+    "mean": 0.19888646031419435,
+    "lo": 0.1832761746644974,
+    "hi": 0.21564980026955405,
+    "n_contents": 30,
+    "eval_mean": 0.20273445546627045,
+    "deploy_mean": 0.003847999032586813,
+    "frac_positive_eval": 0.8888888888888888,
+    "frac_positive_deploy": 0.5888888888888889
+  }
+}

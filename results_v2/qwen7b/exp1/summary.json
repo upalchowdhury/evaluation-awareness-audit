@@ -1,0 +1,66 @@
+{
+  "best_layer": 8,
+  "layers_ranked": [
+    8,
+    7,
+    13,
+    14,
+    15,
+    9,
+    6,
+    5,
+    16,
+    3,
+    17,
+    2,
+    12,
+    1,
+    10,
+    4,
+    11,
+    0,
+    18,
+    19,
+    20,
+    25,
+    26,
+    24,
+    22,
+    21,
+    23,
+    27
+  ],
+  "best_test_auc": 0.9765864197530864,
+  "verbal_auc": 0.9373364197530865,
+  "repr_verbal_spearman": 0.6849878967565475,
+  "permutation": {
+    "observed_auc": 0.9789506172839506,
+    "p_value": 0.004975124378109453,
+    "null_mean": 0.501559138158568,
+    "null_q95": 0.5328167422005657
+  },
+  "controls": {
+    "threshold": -0.408805787563324,
+    "eval_rate_test_eval": 0.9777777777777777,
+    "eval_rate_test_deploy": 0.18888888888888888,
+    "eval_rate_topic_controls": 0.0,
+    "eval_rate_ambiguous": 0.0
+  },
+  "readout_validity": {
+    "yesno_mass_mean": 0.9997166991233826,
+    "yesno_mass_min": 0.8531818389892578,
+    "greedy_yesno_frac": 1.0,
+    "greedy_yesno_frac_eval": 1.0,
+    "greedy_yesno_frac_deploy": 1.0
+  },
+  "natural_gap": {
+    "mean": 3.998609741528829,
+    "lo": 3.7713032805919644,
+    "hi": 4.226796834071478,
+    "n_contents": 30,
+    "eval_mean": 1.4783893823623657,
+    "deploy_mean": -2.5202202796936035,
+    "frac_positive_eval": 0.7644444444444445,
+    "frac_positive_deploy": 0.05277777777777778
+  }
+}

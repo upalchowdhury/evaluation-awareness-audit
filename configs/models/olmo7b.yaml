@@ -1,0 +1,8 @@
+# Cross-family replication point 2: Ai2 OLMo-3 7B Instruct (fully open, ungated).
+model:
+  name: allenai/Olmo-3-7B-Instruct
+  short: olmo7b
+  batch_size: 4
+
+interventions:
+  layer_stride: 2

@@ -1,0 +1,41 @@
+# Tiny end-to-end smoke test (~10-20 min on CPU, minutes on Apple Silicon).
+# Validates wiring, not science.
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  short: qwen05b-smoke
+  batch_size: 4
+  max_new_tokens: 16
+
+data:
+  n_contents: 10
+  templates_per_family: 1
+  test_content_frac: 0.5
+  grid_prompts: 16
+  grid_last_k: 16
+
+probes:
+  cv_folds: 3
+  n_permutations: 20
+
+interventions:
+  alpha_sweep: [-4.0, 0.0, 4.0]
+  n_belief_pairs: 6
+  layer_stride: 4
+  top_layers: 2
+  n_random_controls: 1
+
+behaviors:
+  n_capability_items: 6
+  n_capability_sweep_items: 4
+  n_sycophancy_items: 4
+  n_refusal_items: 3
+  n_selfreport_items: 3
+  refusal_alphas: [0.0]
+
+attribution:
+  n_pairs: 4
+  top_k: 6
+  n_verify_pairs: 3
+  n_behavior_verify_items: 4
+  n_random_dirs: 5

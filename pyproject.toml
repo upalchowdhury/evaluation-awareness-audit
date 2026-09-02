@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evalaware"
+version = "0.1.0"
+description = "From Direction to Circuit: a causal decomposition of evaluation awareness in open-weight language models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Anonymous" }]
+dependencies = [
+    "torch>=2.4",
+    "transformer-lens>=2.15.0",
+    "transformers>=4.45",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "einops>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+evalaware-run = "evalaware.experiments.run_all:cli"
+
+[tool.setuptools.packages.find]
+include = ["evalaware*"]

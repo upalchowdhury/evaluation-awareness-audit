@@ -1,0 +1,8 @@
+# Small model run in fp32: fast iteration AND trustworthy Exp-E gradients
+# (the README's recommended way to get an honest circuit result without an
+# attribution.model_override that swaps models mid-paper). Ungated.
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+  short: qwen15b
+  batch_size: 16
+  dtype: float32

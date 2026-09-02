@@ -1,0 +1,6 @@
+# Small Llama for fast iteration and Exp E gradients. Gated on HuggingFace.
+model:
+  name: meta-llama/Llama-3.2-3B-Instruct
+  short: llama3b
+  batch_size: 8
+  dtype: float32

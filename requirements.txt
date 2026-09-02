@@ -1,0 +1,12 @@
+# Core (versions verified by the smoke run; loosen at your own risk)
+torch>=2.4
+transformer-lens>=2.15.0
+transformers>=4.45
+numpy>=1.26
+pandas>=2.0
+scikit-learn>=1.4
+matplotlib>=3.8
+pyyaml>=6.0
+tqdm>=4.66
+einops>=0.7
+pytest>=8.0

@@ -1,0 +1,10 @@
+# Largest comfortable model on a 96 GB Mac (~28 GB fp16). Prior work suggests
+# evaluation awareness strengthens and moves earlier with scale, so this is the
+# best shot at strong behavioral effects. Expect ~2-4x qwen7b runtimes.
+model:
+  name: Qwen/Qwen2.5-14B-Instruct
+  short: qwen14b
+  batch_size: 4
+
+interventions:
+  layer_stride: 2   # 48 layers; stride 2 keeps sweeps tractable

@@ -1,0 +1,8 @@
+# Small model: fast iteration + fp32 gradients for Exp E on modest memory.
+# Gated: accept the license on HuggingFace first. Gemma has no system role;
+# the code folds system prompts into the user turn automatically.
+model:
+  name: google/gemma-2-2b-it
+  short: gemma2b
+  batch_size: 8
+  dtype: float32
