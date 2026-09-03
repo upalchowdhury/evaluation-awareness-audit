@@ -35,7 +35,7 @@ Section~\ref{sec:disclosure}.}}
 \maketitle
 \vspace{-1em}
 
-\section*{Summary in plain words}
+\section*{Summary}
 
 Safety evaluations assume that a model behaves the same way under test as it
 does with real users. That assumption breaks if the model can tell the
@@ -106,17 +106,14 @@ easily one of them fails silently.
 
 An evaluation is only informative if the behaviour it measures is the
 behaviour that will occur in deployment. Models that recognise evaluations
-could, in principle, behave better under test than in use
-\citep{needham2025evaluated,greenblatt2024alignment}. Several 2025--2026
-papers established that the recognition is real in open models: a linear
-probe on the residual stream separates evaluation-framed from
-deployment-framed prompts \citep{nguyen2025probing,heidari2026evalaware},
-the representation strengthens with scale
-\citep{chaudhary2025scaling,manek2026depth}, verbalising it barely changes
-behaviour \citep{knecht2026limited,li2026decomposing}, detection,
-representation and controllability come apart across models
-\citep{nayan2026notone}, and probe evidence may be format sensitivity in
-disguise \citep{devbunova2026format}.
+could, in principle, behave better under test than in use. Recent work on
+open models established the first half of that worry: a linear probe on the
+residual stream separates evaluation-framed from deployment-framed prompts
+\citep{nguyen2025probing}. The same line of work raised a doubt about its own
+evidence, that such a probe may be reading prompt format rather than context
+\citep{devbunova2026format}. Whether the recognition reaches what the model
+says, and whether either reaches what it does, is what I set out to
+measure.
 
 My question was narrower than ``does the model know?'' It was: on one
 controlled corpus, with the same items throughout, what does each way of
@@ -444,10 +441,9 @@ deployment-framed prompt. The matched patch and the control differed in task
 content but agreed in class, so their difference could only ever measure the
 effect of content. It could not measure the thing I cared about. This is the
 textbook bad-control mistake \citep{cinelli2022crash}: the control held fixed
-exactly the variable under study. Nothing in the patching literature told me
-to make it, and I do not claim anyone else has; but the ``unrelated prompt''
-control is common enough \citep{heimersheim2024patching,zhang2024bestpractices}
-that I think the trap is worth naming.
+exactly the variable under study. Nothing told me to make it, and I do not
+claim anyone else has; but an unrelated prompt is an easy thing to reach for
+when a control is wanted, so I think the trap is worth naming.
 
 \paragraph{The repair.} Complete the design. Four sources per destination:
 same class or other class, crossed with same task or other task. Then the
@@ -547,8 +543,7 @@ other models are in Table~\ref{tab:interventions}, where the framing effect
 excludes zero only on \VframingSigModels{}. Steering $d$ hard enough to move
 the stated belief by \NswingDBelief{} logits moves accuracy by
 \NswingDAcc{}. Apart from the Olmo cell, these are bounded nulls on trivia
-questions that give the models no reason to sandbag; they are consistent with
-\citet{knecht2026limited} and \citet{li2026decomposing} and I claim nothing
+questions that give the models no reason to sandbag, and I claim nothing
 beyond that.
 
 \section{What I got wrong, in order}\label{sec:process}
@@ -624,15 +619,18 @@ raw and gap-scaled effects are always reported together.
 
 \section{Related work}
 
-Evaluation awareness: decodability, steering, scaling, and dissociations
-\citep{needham2025evaluated,nguyen2025probing,abdelnabi2025linear,heidari2026evalaware,hua2026steering,chaudhary2025scaling,manek2026depth,nayan2026notone,knecht2026limited,li2026decomposing};
-format sensitivity of probes \citep{devbunova2026format}. Patching practice
-and its pitfalls \citep{heimersheim2024patching,wang2022ioi,zhang2024bestpractices,makelov2024illusion};
-the estimand of a control contrast is the ``bad control'' problem of causal
-inference \citep{cinelli2022crash}, and interchange interventions formalise
-what a patch identifies \citep{vig2020causal,geiger2021causal}. Steering
-validity, including inverted steering vectors
-\citep{torop2026inverted,zou2023repe,turner2023activation,rimsky2023caa,arditi2024refusal}.
+This reference list is deliberately short: it names the work this paper
+directly builds on or corrects, not the wider literature. Evaluation
+awareness is linearly decodable from the residual stream of open models
+\citep{nguyen2025probing}, and probe evidence for it has been challenged as
+format sensitivity rather than context \citep{devbunova2026format};
+Section~\ref{sec:reading} reproduces both results and comes down on the side
+of the challenge. The control contrast I first used, and its repair in
+Section~\ref{sec:patch}, is an instance of the bad-control problem in causal
+inference \citep{cinelli2022crash}. Steering vectors that move a readout in
+the direction opposite to the intended one have been reported before
+\citep{torop2026inverted}; Section~\ref{sec:steer} adds a case measured with
+a readout the model demonstrably answers.
 
 \section{Disclosure and verification}\label{sec:disclosure}
 \textbf{Tools.} Code, orchestration, drafting and several rounds of
@@ -641,9 +639,7 @@ automated auditing were done with substantial help from Anthropic's Claude
 version. The readout-validity check that changed the project was an
 automated audit's finding, verified by me.
 
-\textbf{What I personally designed, read, and checked.}
-
-\textbf{Designed by me, and not.} My hypothesis is that a model can show
+\textbf{Goal.} My hypothesis is that a model can show
 evaluation awareness in different ways, and those ways are not necessarily
 the same: the model might internally represent that it is being tested, say
 that it is being tested, and still not change its behaviour. For the control,
@@ -656,16 +652,16 @@ reviewer objection; the readout-validity check, the two-turn readout, and the
 calibration against the natural gap and a random-direction null came from
 automated audits, which I then verified.
 
-\textbf{Code read end to end.} I read the code that builds the belief prompt,
+\textbf{Code review.} I read the code that builds the belief prompt,
 computes the belief score, performs steering, ablation and patching, runs the
 positional 2$\times$2 experiment, and computes the bootstrap statistics.
 
-\textbf{Prompts inspected by hand.} I inspected a sample of prompt pairs and
+\textbf{Prompts inspected.} I inspected a sample of prompt pairs and
 their recorded scores. I checked that the evaluation and deployment framings
 rendered correctly, that the belief question appeared in its own turn, and
 that the score usually moved in the expected direction.
 
-\textbf{Numbers I recomputed myself.} I used a separate script, which shares
+\textbf{Numbers recomputed.} I used a separate script, which shares
 no code with the one that writes this paper's macros, to recompute the main
 results directly from the per-item files.
 
@@ -680,24 +676,10 @@ independently tested the bootstrap coverage.
 covering code development and running the experiments. Time spent reading
 papers and mechanistic-interpretability learning material is not included.
 
-\textbf{Other contributors.} None.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
 
-\appendix
-\section{Cue families}
-\IfFileExists{tables/cue_families.tex}{\input{tables/cue_families.tex}}{\todo{assets}}
 
-\section{Data accounting and statistics}
-Layer sweeps use \NpairsExpTwo{} evaluation/deployment pairs over
-\NclustersExpTwo{} held-out tasks. The four-cell patching designs use one
-fixed list of \NclustersFone{} held-out tasks on every model, chosen before
-any effect was computed; renderings whose framing places text after the task
-are excluded from all patching pairs because they do not share the task
-tokens with their twin. Every interval is a percentile bootstrap that
-resamples tasks (2000 draws). Locked estimates select the layer on the
-even-indexed half of the tasks and estimate on the odd-indexed half. The
-positional table's Holm correction is over all its cells at once.
 
 \end{document}
